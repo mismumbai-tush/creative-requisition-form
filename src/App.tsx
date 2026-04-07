@@ -105,7 +105,14 @@ export default function App() {
       }
     } catch (error: any) {
       console.error("Sign in error:", error);
-      setErrorMessage("Failed to sign in. Please try again.");
+      if (error.code === 'auth/operation-not-allowed') {
+        setErrorMessage("Google Sign-In is not enabled in Firebase Console. Please enable it in Authentication > Sign-in method.");
+      } else if (error.code === 'auth/cancelled-popup-request') {
+        setErrorMessage("Sign-in popup was closed before finishing.");
+      } else {
+        setErrorMessage("Failed to sign in: " + error.message);
+      }
+      setSubmitStatus('error');
     }
   };
 
