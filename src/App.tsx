@@ -190,7 +190,7 @@ export default function App() {
         setSubmitStatus('success');
         setFormData({
           ...INITIAL_DATA,
-          email: 'mis.mumbai@ginzalimited.com',
+          email: user?.email || '',
           deliveryDate: minDeliveryDate
         });
       } else {
@@ -596,7 +596,7 @@ export default function App() {
         {/* Footer */}
         <footer className="text-center py-8">
           <p className="text-xs text-gray-400 font-medium uppercase tracking-widest">
-            Powered by Google AI Studio & Google Sheets
+            Powered by Google Form & Google Sheets
           </p>
         </footer>
       </div>

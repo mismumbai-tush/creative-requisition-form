@@ -41,14 +41,33 @@ async function startServer() {
 
   // Lazy-load Google Sheets API to prevent startup crashes
   const getSheets = () => {
-    if (!GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY) {
-      throw new Error('Google Sheets credentials (GOOGLE_CLIENT_EMAIL or GOOGLE_PRIVATE_KEY) are not configured in environment variables.');
+    if (!GOOGLE_CLIENT_EMAIL) {
+      throw new Error('GOOGLE_CLIENT_EMAIL is missing in environment variables.');
+    }
+    if (!GOOGLE_PRIVATE_KEY) {
+      throw new Error('GOOGLE_PRIVATE_KEY is missing in environment variables.');
     }
     
+    // Robust private key cleaning
+    let privateKey = GOOGLE_PRIVATE_KEY;
+    
+    // Remove surrounding quotes if they exist
+    privateKey = privateKey.trim().replace(/^"(.*)"$/, '$1');
+    
+    // Handle literal \n strings (common when pasting into Vercel)
+    if (privateKey.includes('\\n')) {
+      privateKey = privateKey.replace(/\\n/g, '\n');
+    }
+    
+    // Ensure it has the correct header/footer
+    if (!privateKey.includes('-----BEGIN PRIVATE KEY-----')) {
+      throw new Error('GOOGLE_PRIVATE_KEY format is invalid. It must include "-----BEGIN PRIVATE KEY-----".');
+    }
+
     const auth = new google.auth.GoogleAuth({
       credentials: {
         client_email: GOOGLE_CLIENT_EMAIL,
-        private_key: GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n').replace(/\n/g, '\n').replace(/^"(.*)"$/, '$1'),
+        private_key: privateKey,
       },
       scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     });
