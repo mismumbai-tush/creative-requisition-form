@@ -12,8 +12,6 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
-
   app.use(express.json());
 
   // Google Sheets API Setup
@@ -27,9 +25,6 @@ async function startServer() {
 
   const sheets = google.sheets({ version: 'v4', auth });
   const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID || '1Ng_ItkiSLgfHOBTlX0CVN5l51eQM-55v_YYLw81XauM';
-
-  const app = express();
-  app.use(express.json());
 
   // API Route for Form Submission
   app.post('/api/submit', async (req, res) => {
@@ -124,15 +119,24 @@ async function startServer() {
     }
   });
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
+  // Vite middleware for development or if dist doesn't exist
+  const distPath = path.join(process.cwd(), 'dist');
+  const isProduction = process.env.NODE_ENV === 'production';
+  
+  // Check if dist exists (using fs.existsSync would be better but we don't have it imported)
+  // We'll rely on NODE_ENV and VERCEL env var
+  if (!isProduction || !process.env.VERCEL) {
+    try {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } catch (e) {
+      console.warn('Failed to start Vite server, falling back to static');
+      app.use(express.static(distPath));
+    }
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
@@ -150,8 +154,8 @@ export default async (req: any, res: any) => {
   return app(req, res);
 };
 
-// For local development
-if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+// For local development (including AI Studio preview)
+if (!process.env.VERCEL) {
   appPromise.then(app => {
     const PORT = 3000;
     app.listen(PORT, '0.0.0.0', () => {
