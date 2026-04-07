@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { analytics } from './firebase';
+import { analytics, auth, googleProvider } from './firebase';
 import { logEvent } from 'firebase/analytics';
+import { signInWithPopup, onAuthStateChanged, signOut, User as FirebaseUser } from 'firebase/auth';
 import { 
   Send, 
   CheckCircle2, 
@@ -16,7 +17,9 @@ import {
   Box,
   Layers,
   ArrowRight,
-  Loader2
+  Loader2,
+  LogOut,
+  LogIn
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -71,9 +74,10 @@ const INITIAL_DATA: FormData = {
 };
 
 export default function App() {
+  const [user, setUser] = useState<FirebaseUser | null>(null);
   const [formData, setFormData] = useState<FormData>({
     ...INITIAL_DATA,
-    email: 'mis.mumbai@ginzalimited.com' // Pre-filled as per "automatic collection"
+    email: '' 
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'error'>('idle');
@@ -82,6 +86,33 @@ export default function App() {
   // Auto-calculated fields
   const [timestamp, setTimestamp] = useState('');
   const [minDeliveryDate, setMinDeliveryDate] = useState('');
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      if (currentUser?.email) {
+        setFormData(prev => ({ ...prev, email: currentUser.email || '' }));
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleSignIn = async () => {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      if (result.user.email) {
+        setFormData(prev => ({ ...prev, email: result.user.email || '' }));
+      }
+    } catch (error: any) {
+      console.error("Sign in error:", error);
+      setErrorMessage("Failed to sign in. Please try again.");
+    }
+  };
+
+  const handleSignOut = async () => {
+    await signOut(auth);
+    setFormData(prev => ({ ...prev, email: '' }));
+  };
 
   useEffect(() => {
     const updateDates = () => {
@@ -133,7 +164,14 @@ export default function App() {
         }),
       });
 
-      const result = await response.json();
+      let result;
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        result = await response.json();
+      } else {
+        const text = await response.text();
+        throw new Error(text || `Server error: ${response.status} ${response.statusText}`);
+      }
 
       if (result.success) {
         if (analytics) {
@@ -209,13 +247,41 @@ export default function App() {
                     type="email"
                     name="email"
                     required
+                    readOnly={!!user}
                     value={formData.email}
                     onChange={handleChange}
                     placeholder="your@email.com"
-                    className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all outline-none text-base"
+                    className={cn(
+                      "w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all outline-none text-base font-medium",
+                      user ? "text-purple-700 bg-purple-50 border-purple-100" : "text-gray-700"
+                    )}
                   />
+                  {user && (
+                    <button
+                      type="button"
+                      onClick={handleSignOut}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                      title="Sign Out"
+                    >
+                      <LogOut className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
-                <p className="text-[10px] text-gray-400 mt-1 ml-1">Required to send response copies</p>
+                {!user ? (
+                  <button
+                    type="button"
+                    onClick={handleSignIn}
+                    className="mt-2 flex items-center gap-2 text-sm font-medium text-purple-600 hover:text-purple-700 transition-colors"
+                  >
+                    <LogIn className="w-4 h-4" />
+                    Sign in with Google to capture email automatically
+                  </button>
+                ) : (
+                  <p className="text-[10px] text-gray-400 mt-1 ml-1 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3 text-green-500" />
+                    Captured automatically from your Google Account
+                  </p>
+                )}
               </InputGroup>
 
               <InputGroup label="Brand" required>

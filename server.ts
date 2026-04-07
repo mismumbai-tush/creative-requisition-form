@@ -14,21 +14,36 @@ async function startServer() {
   const app = express();
   app.use(express.json());
 
-  // Google Sheets API Setup
-  const auth = new google.auth.GoogleAuth({
-    credentials: {
-      client_email: process.env.GOOGLE_CLIENT_EMAIL,
-      private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-    },
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-  });
-
-  const sheets = google.sheets({ version: 'v4', auth });
+  // Validate Environment Variables
+  const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
+  const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY;
   const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID || '1Ng_ItkiSLgfHOBTlX0CVN5l51eQM-55v_YYLw81XauM';
+
+  if (!GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY) {
+    console.warn('WARNING: Google Sheets credentials (GOOGLE_CLIENT_EMAIL or GOOGLE_PRIVATE_KEY) are missing.');
+  }
+
+  // Lazy-load Google Sheets API to prevent startup crashes
+  const getSheets = () => {
+    if (!GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY) {
+      throw new Error('Google Sheets credentials (GOOGLE_CLIENT_EMAIL or GOOGLE_PRIVATE_KEY) are not configured in environment variables.');
+    }
+    
+    const auth = new google.auth.GoogleAuth({
+      credentials: {
+        client_email: GOOGLE_CLIENT_EMAIL,
+        private_key: GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n').replace(/^"(.*)"$/, '$1'),
+      },
+      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
+
+    return google.sheets({ version: 'v4', auth });
+  };
 
   // API Route for Form Submission
   app.post('/api/submit', async (req, res) => {
     try {
+      const sheets = getSheets();
       const data = req.body;
       const now = new Date();
       const monthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' }); // e.g., "April 2026"
@@ -150,8 +165,13 @@ const appPromise = startServer();
 
 // For Vercel, we export the app
 export default async (req: any, res: any) => {
-  const app = await appPromise;
-  return app(req, res);
+  try {
+    const app = await appPromise;
+    return app(req, res);
+  } catch (error: any) {
+    console.error('Vercel Function Error:', error);
+    res.status(500).json({ success: false, message: `A server error occurred: ${error.message}` });
+  }
 };
 
 // For local development (including AI Studio preview)

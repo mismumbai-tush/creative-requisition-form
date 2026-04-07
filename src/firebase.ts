@@ -1,5 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
+import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDFjOinpgJFts-FHY4FxRUbyWDGbMFxCzc",
@@ -16,4 +17,7 @@ const app = initializeApp(firebaseConfig);
 
 // Initialize Analytics only in browser environment
 export const analytics = typeof window !== "undefined" ? getAnalytics(app) : null;
+export const auth = getAuth(app);
+export const googleProvider = new GoogleAuthProvider();
+
 export default app;
