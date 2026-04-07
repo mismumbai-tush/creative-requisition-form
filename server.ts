@@ -14,14 +14,30 @@ async function startServer() {
   const app = express();
   app.use(express.json());
 
+  // Add COOP header for Firebase Auth popups
+  app.use((req, res, next) => {
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+    next();
+  });
+
   // Validate Environment Variables
   const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
   const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY;
   const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID || '1Ng_ItkiSLgfHOBTlX0CVN5l51eQM-55v_YYLw81XauM';
 
-  if (!GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY) {
-    console.warn('WARNING: Google Sheets credentials (GOOGLE_CLIENT_EMAIL or GOOGLE_PRIVATE_KEY) are missing.');
-  }
+  // Health Check Route
+  app.get('/api/health', (req, res) => {
+    res.json({ 
+      status: 'ok', 
+      config: {
+        hasEmail: !!GOOGLE_CLIENT_EMAIL,
+        hasKey: !!GOOGLE_PRIVATE_KEY,
+        spreadsheetId: SPREADSHEET_ID,
+        nodeEnv: process.env.NODE_ENV,
+        isVercel: !!process.env.VERCEL
+      }
+    });
+  });
 
   // Lazy-load Google Sheets API to prevent startup crashes
   const getSheets = () => {
@@ -32,7 +48,7 @@ async function startServer() {
     const auth = new google.auth.GoogleAuth({
       credentials: {
         client_email: GOOGLE_CLIENT_EMAIL,
-        private_key: GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n').replace(/^"(.*)"$/, '$1'),
+        private_key: GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n').replace(/\n/g, '\n').replace(/^"(.*)"$/, '$1'),
       },
       scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     });
