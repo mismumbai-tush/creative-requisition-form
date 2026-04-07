@@ -1,0 +1,5 @@
+{
+  "name": "Creative Requisition Form",
+  "description": "A professional form for creative requests that automatically syncs with Google Sheets, featuring conditional logic and automated delivery date calculation.",
+  "requestFramePermissions": []
+}

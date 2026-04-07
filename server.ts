@@ -1,0 +1,144 @@
+import express from 'express';
+import { createServer as createViteServer } from 'vite';
+import path from 'path';
+import { google } from 'googleapis';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+async function startServer() {
+  const app = express();
+  const PORT = 3000;
+
+  app.use(express.json());
+
+  // Google Sheets API Setup
+  const auth = new google.auth.GoogleAuth({
+    credentials: {
+      client_email: process.env.GOOGLE_CLIENT_EMAIL,
+      private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    },
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
+
+  const sheets = google.sheets({ version: 'v4', auth });
+  const SPREADSHEET_ID = '1Ng_ItkiSLgfHOBTlX0CVN5l51eQM-55v_YYLw81XauM';
+
+  // API Route for Form Submission
+  app.post('/api/submit', async (req, res) => {
+    try {
+      const data = req.body;
+      const now = new Date();
+      const monthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' }); // e.g., "April 2026"
+      
+      // 1. Check if the sheet (tab) exists, if not create it
+      const spreadsheet = await sheets.spreadsheets.get({
+        spreadsheetId: SPREADSHEET_ID,
+      });
+
+      const sheetExists = spreadsheet.data.sheets?.some(
+        (s) => s.properties?.title === monthYear
+      );
+
+      if (!sheetExists) {
+        await sheets.spreadsheets.batchUpdate({
+          spreadsheetId: SPREADSHEET_ID,
+          requestBody: {
+            requests: [
+              {
+                addSheet: {
+                  properties: {
+                    title: monthYear,
+                  },
+                },
+              },
+            ],
+          },
+        });
+
+        // Add headers to the new sheet
+        const headers = [
+          'Timestamp', 'Email', 'Brand', 'Department', 'Employee Name', 
+          'Store/Portal/Brand Name', 'Description of Creative', 'Color', 
+          'Image Reference', 'Required Delivery Date', 'Extra Remarks', 
+          'Artwork Type', 'Width', 'Length/Height', 'Style no with colour', 
+          '3D Width', '3D Length', '3D Height'
+        ];
+
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SPREADSHEET_ID,
+          range: `${monthYear}!A1`,
+          valueInputOption: 'RAW',
+          requestBody: {
+            values: [headers],
+          },
+        });
+      }
+
+      // 2. Append the data
+      const row = [
+        data.timestamp,
+        data.email,
+        data.brand,
+        data.department,
+        data.employeeName,
+        data.storeName,
+        data.description,
+        data.color,
+        data.imageReference,
+        data.deliveryDate,
+        data.remarks,
+        data.artworkType,
+        data.width2d || '',
+        data.lengthHeight2d || '',
+        data.styleNoColor2d || '',
+        data.width3d || '',
+        data.length3d || '',
+        data.height3d || ''
+      ];
+
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `${monthYear}!A1`,
+        valueInputOption: 'RAW',
+        requestBody: {
+          values: [row],
+        },
+      });
+
+      res.json({ success: true, message: 'Form submitted successfully' });
+    } catch (error: any) {
+      console.error('Error submitting to Google Sheets:', error);
+      res.status(500).json({ 
+        success: false, 
+        message: 'Failed to submit form', 
+        error: error.message 
+      });
+    }
+  });
+
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
+
+startServer();
