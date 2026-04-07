@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { analytics } from './firebase';
+import { logEvent } from 'firebase/analytics';
 import { 
   Send, 
   CheckCircle2, 
@@ -134,6 +136,12 @@ export default function App() {
       const result = await response.json();
 
       if (result.success) {
+        if (analytics) {
+          logEvent(analytics, 'form_submission_success', {
+            brand: formData.brand,
+            department: formData.department
+          });
+        }
         setSubmitStatus('success');
         setFormData({
           ...INITIAL_DATA,

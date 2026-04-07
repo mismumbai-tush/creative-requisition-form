@@ -26,7 +26,10 @@ async function startServer() {
   });
 
   const sheets = google.sheets({ version: 'v4', auth });
-  const SPREADSHEET_ID = '1Ng_ItkiSLgfHOBTlX0CVN5l51eQM-55v_YYLw81XauM';
+  const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID || '1Ng_ItkiSLgfHOBTlX0CVN5l51eQM-55v_YYLw81XauM';
+
+  const app = express();
+  app.use(express.json());
 
   // API Route for Form Submission
   app.post('/api/submit', async (req, res) => {
@@ -136,9 +139,23 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  return app;
 }
 
-startServer();
+const appPromise = startServer();
+
+// For Vercel, we export the app
+export default async (req: any, res: any) => {
+  const app = await appPromise;
+  return app(req, res);
+};
+
+// For local development
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+  appPromise.then(app => {
+    const PORT = 3000;
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  });
+}
