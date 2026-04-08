@@ -134,8 +134,15 @@ const submitToSheets = async (data: any) => {
       'Timestamp', 'Email', 'Brand', 'Department', 'Employee Name', 
       'Store/Portal/Brand Name', 'Description of Creative', 'Color', 
       'Image Reference', 'Required Delivery Date', 'Extra Remarks', 
-      'Artwork Type', 'Width', 'Length/Height', 'Style no with colour', 
-      '3D Width', '3D Length', '3D Height'
+      'Width', 'Length/Height', 'Style no with colour', 
+      'Width', 'Length', 'Height'
+    ];
+
+    // Top-level category headers
+    const topHeaders = [
+      '', '', '', '', '', '', '', '', '', '', '', 
+      '2D / FLAT ARTWORKS', '', '', 
+      '3D ARTWORKS', '', ''
     ];
 
     const headerResponse = await fetch(`${baseUrl}/values/${monthYear}!A1?valueInputOption=RAW`, {
@@ -144,7 +151,7 @@ const submitToSheets = async (data: any) => {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ values: [headers] })
+      body: JSON.stringify({ values: [topHeaders, headers] })
     });
 
     if (!headerResponse.ok) {
@@ -157,8 +164,10 @@ const submitToSheets = async (data: any) => {
   const row = [
     data.timestamp, data.email, data.brand, data.department, data.employeeName,
     data.storeName, data.description, data.color, data.imageReference,
-    data.deliveryDate, data.remarks, data.artworkType,
+    data.deliveryDate, data.remarks,
+    // 2D Data (L, M, N)
     data.width2d || '', data.lengthHeight2d || '', data.styleNoColor2d || '',
+    // 3D Data (O, P, Q)
     data.width3d || '', data.length3d || '', data.height3d || ''
   ];
 
