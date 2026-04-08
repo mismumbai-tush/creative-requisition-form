@@ -127,6 +127,11 @@ export default function App() {
       const future = new Date(now);
       future.setDate(now.getDate() + 4);
 
+      // If the 4th day is Sunday (0), move it to Monday (add 1 more day)
+      if (future.getDay() === 0) {
+        future.setDate(future.getDate() + 1);
+      }
+
       setTimestamp(now.toLocaleString());
       
       // Format for date input min attribute (YYYY-MM-DD)
@@ -422,6 +427,9 @@ export default function App() {
           {/* Artwork Specifications Section */}
           <Section title="Artwork Specifications" icon={<Layers className="w-5 h-5 text-purple-500" />}>
             <div className="space-y-6">
+              <p className="text-xs text-red-500 -mt-2 mb-2 font-bold italic">
+                "Not Mandatory to fill, but selecting one option is required"
+              </p>
               <div className="flex flex-wrap gap-3">
                 <button
                   type="button"
