@@ -171,7 +171,8 @@ const submitToSheets = async (data: any) => {
     data.width3d || '', data.length3d || '', data.height3d || ''
   ];
 
-  const appendResponse = await fetch(`${baseUrl}/values/${monthYear}!A1:append?valueInputOption=RAW`, {
+  // Use A:F range to find the last row based on mandatory columns
+  const appendResponse = await fetch(`${baseUrl}/values/${monthYear}!A:F:append?valueInputOption=RAW`, {
     method: 'POST',
     headers: { 
       Authorization: `Bearer ${token}`,
