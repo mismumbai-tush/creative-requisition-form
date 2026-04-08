@@ -8,6 +8,8 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+console.log('Server module loading...');
+
 const app = express();
 app.use(express.json());
 
@@ -36,110 +38,196 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Lazy-load Google Sheets API
-const getSheets = async () => {
-  if (!GOOGLE_CLIENT_EMAIL) throw new Error('GOOGLE_CLIENT_EMAIL is missing');
-  if (!GOOGLE_PRIVATE_KEY) throw new Error('GOOGLE_PRIVATE_KEY is missing');
+// Lightweight Google Sheets submission using google-auth-library and fetch
+const submitToSheets = async (data: any) => {
+  console.log('Starting submitToSheets...');
+  if (!GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY) {
+    console.error('Missing credentials:', { hasEmail: !!GOOGLE_CLIENT_EMAIL, hasKey: !!GOOGLE_PRIVATE_KEY });
+    throw new Error('Google Sheets credentials are missing');
+  }
+
+  console.log('Importing JWT...');
+  const { JWT } = await import('google-auth-library');
   
-  const { google } = await import('googleapis');
-  
+  console.log('Cleaning private key...');
   let privateKey = GOOGLE_PRIVATE_KEY.trim().replace(/^"(.*)"$/, '$1');
   if (privateKey.includes('\\n')) {
     privateKey = privateKey.replace(/\\n/g, '\n');
   }
-  
-  const auth = new google.auth.GoogleAuth({
-    credentials: {
-      client_email: GOOGLE_CLIENT_EMAIL,
-      private_key: privateKey,
-    },
+  console.log('Private key cleaned. Starts with:', privateKey.substring(0, 30));
+
+  console.log('Initializing JWT client...');
+  const client = new JWT({
+    email: GOOGLE_CLIENT_EMAIL,
+    key: privateKey,
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
 
-  return google.sheets({ version: 'v4', auth });
+  console.log('Getting access token...');
+  const tokenResponse = await client.getAccessToken();
+  const token = tokenResponse.token;
+
+  if (!token) {
+    console.error('Token response empty');
+    throw new Error('Failed to get Google Auth token');
+  }
+
+  const now = new Date();
+  const monthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`;
+
+  console.log(`Checking if sheet exists: ${monthYear}`);
+  const ssResponse = await fetch(`${baseUrl}?fields=sheets.properties.title`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  
+  if (!ssResponse.ok) {
+    const errText = await ssResponse.text();
+    console.error('Spreadsheet fetch failed:', errText);
+    throw new Error(`Failed to fetch spreadsheet: ${errText}`);
+  }
+  
+  const ssData = await ssResponse.json();
+  const sheetExists = ssData.sheets?.some((s: any) => s.properties?.title === monthYear);
+
+  if (!sheetExists) {
+    console.log(`Creating new sheet: ${monthYear}`);
+    const createResponse = await fetch(`${baseUrl}:batchUpdate`, {
+      method: 'POST',
+      headers: { 
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        requests: [{ addSheet: { properties: { title: monthYear } } }]
+      })
+    });
+    
+    if (!createResponse.ok) {
+      const errText = await createResponse.text();
+      console.error('Sheet creation failed:', errText);
+      throw new Error(`Failed to create sheet: ${errText}`);
+    }
+
+    console.log('Adding headers to new sheet...');
+    const headers = [
+      'Timestamp', 'Email', 'Brand', 'Department', 'Employee Name', 
+      'Store/Portal/Brand Name', 'Description of Creative', 'Color', 
+      'Image Reference', 'Required Delivery Date', 'Extra Remarks', 
+      'Artwork Type', 'Width', 'Length/Height', 'Style no with colour', 
+      '3D Width', '3D Length', '3D Height'
+    ];
+
+    const headerResponse = await fetch(`${baseUrl}/values/${monthYear}!A1?valueInputOption=RAW`, {
+      method: 'PUT',
+      headers: { 
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ values: [headers] })
+    });
+
+    if (!headerResponse.ok) {
+      const errText = await headerResponse.text();
+      console.error('Header update failed:', errText);
+    }
+  }
+
+  console.log('Appending row data...');
+  const row = [
+    data.timestamp, data.email, data.brand, data.department, data.employeeName,
+    data.storeName, data.description, data.color, data.imageReference,
+    data.deliveryDate, data.remarks, data.artworkType,
+    data.width2d || '', data.lengthHeight2d || '', data.styleNoColor2d || '',
+    data.width3d || '', data.length3d || '', data.height3d || ''
+  ];
+
+  const appendResponse = await fetch(`${baseUrl}/values/${monthYear}!A1:append?valueInputOption=RAW`, {
+    method: 'POST',
+    headers: { 
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ values: [row] })
+  });
+
+  if (!appendResponse.ok) {
+    const errText = await appendResponse.text();
+    console.error('Append failed:', errText);
+    throw new Error(`Failed to append data: ${errText}`);
+  }
+
+  console.log('submitToSheets completed successfully');
+  return { success: true };
 };
 
 // API Route for Form Submission
 app.post('/api/submit', async (req, res) => {
+  console.log('Received submission request');
   try {
-    const sheets = await getSheets();
-    const data = req.body;
-    const now = new Date();
-    const monthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-    
-    const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
-    const sheetExists = spreadsheet.data.sheets?.some(s => s.properties?.title === monthYear);
-
-    if (!sheetExists) {
-      await sheets.spreadsheets.batchUpdate({
-        spreadsheetId: SPREADSHEET_ID,
-        requestBody: {
-          requests: [{ addSheet: { properties: { title: monthYear } } }],
-        },
-      });
-
-      const headers = [
-        'Timestamp', 'Email', 'Brand', 'Department', 'Employee Name', 
-        'Store/Portal/Brand Name', 'Description of Creative', 'Color', 
-        'Image Reference', 'Required Delivery Date', 'Extra Remarks', 
-        'Artwork Type', 'Width', 'Length/Height', 'Style no with colour', 
-        '3D Width', '3D Length', '3D Height'
-      ];
-
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: SPREADSHEET_ID,
-        range: `${monthYear}!A1`,
-        valueInputOption: 'RAW',
-        requestBody: { values: [headers] },
-      });
-    }
-
-    const row = [
-      data.timestamp, data.email, data.brand, data.department, data.employeeName,
-      data.storeName, data.description, data.color, data.imageReference,
-      data.deliveryDate, data.remarks, data.artworkType,
-      data.width2d || '', data.lengthHeight2d || '', data.styleNoColor2d || '',
-      data.width3d || '', data.length3d || '', data.height3d || ''
-    ];
-
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${monthYear}!A1`,
-      valueInputOption: 'RAW',
-      requestBody: { values: [row] },
-    });
-
-    res.json({ success: true });
+    const result = await submitToSheets(req.body);
+    console.log('Submission successful');
+    res.json(result);
   } catch (error: any) {
-    console.error('Submission Error:', error);
-    res.status(500).json({ success: false, error: error.message });
+    console.error('Submission Error Details:', {
+      message: error.message,
+      stack: error.stack,
+      body: req.body
+    });
+    res.status(500).json({ 
+      success: false, 
+      error: 'Internal Server Error', 
+      message: error.message 
+    });
   }
 });
 
 // Static files & SPA fallback
-const isProduction = process.env.NODE_ENV === 'production';
+const isProduction = process.env.NODE_ENV === 'production' || !!process.env.VERCEL;
 const distPath = path.join(process.cwd(), 'dist');
 
-if (isProduction && process.env.VERCEL) {
+if (isProduction) {
+  // In production (Vercel), serve static files if they exist
   app.use(express.static(distPath));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(distPath, 'index.html'));
+  app.get('*', (req, res, next) => {
+    // Only handle non-API routes
+    if (req.path.startsWith('/api/')) return next();
+    res.sendFile(path.join(distPath, 'index.html'), (err) => {
+      if (err) {
+        // If index.html is missing, just send a 404 or let it pass
+        res.status(404).send('Not Found');
+      }
+    });
   });
 } else {
   // Dev mode with Vite
   const setupVite = async () => {
-    const { createServer } = await import('vite');
-    const vite = await createServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
+    try {
+      const { createServer } = await import('vite');
+      const vite = await createServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } catch (e) {
+      console.error('Vite setup failed:', e);
+    }
   };
   setupVite();
 }
 
 // Export for Vercel
 export default app;
+
+// Global error handler
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error('Global Error Handler:', err.stack);
+  res.status(500).json({
+    success: false,
+    error: 'Something broke!',
+    message: err.message
+  });
+});
 
 // Local listen
 if (!process.env.VERCEL) {
