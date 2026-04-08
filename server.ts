@@ -50,11 +50,22 @@ const submitToSheets = async (data: any) => {
   const { JWT } = await import('google-auth-library');
   
   console.log('Cleaning private key...');
-  let privateKey = GOOGLE_PRIVATE_KEY.trim().replace(/^"(.*)"$/, '$1');
-  if (privateKey.includes('\\n')) {
-    privateKey = privateKey.replace(/\\n/g, '\n');
+  let privateKey = GOOGLE_PRIVATE_KEY.trim();
+  
+  // Remove surrounding quotes (single or double) and trailing commas/whitespace
+  // This handles cases where users copy from a JSON file like "key": "...",
+  privateKey = privateKey.replace(/^['"]/, '').replace(/['"]\s*,?\s*$/, '');
+  
+  // Replace literal \n with actual newlines
+  privateKey = privateKey.replace(/\\n/g, '\n');
+  
+  if (!privateKey.includes('-----BEGIN PRIVATE KEY-----')) {
+    console.warn('Warning: GOOGLE_PRIVATE_KEY is missing PEM headers.');
   }
-  console.log('Private key cleaned. Starts with:', privateKey.substring(0, 30));
+
+  console.log('Private key cleaned. Length:', privateKey.length);
+  console.log('Private key starts with:', privateKey.substring(0, 30));
+  console.log('Private key ends with:', privateKey.substring(privateKey.length - 30));
 
   console.log('Initializing JWT client...');
   const client = new JWT({
@@ -64,8 +75,17 @@ const submitToSheets = async (data: any) => {
   });
 
   console.log('Getting access token...');
-  const tokenResponse = await client.getAccessToken();
-  const token = tokenResponse.token;
+  let token;
+  try {
+    const tokenResponse = await client.getAccessToken();
+    token = tokenResponse.token;
+  } catch (error: any) {
+    console.error('Auth token error:', error);
+    if (error.message.includes('DECODER routines') || error.message.includes('unsupported')) {
+      throw new Error('GOOGLE_PRIVATE_KEY format is invalid. Please ensure you have pasted the entire key including "-----BEGIN PRIVATE KEY-----" and "-----END PRIVATE KEY-----". If you are using Vercel, try wrapping the key in double quotes.');
+    }
+    throw new Error(`Google Auth failed: ${error.message}`);
+  }
 
   if (!token) {
     console.error('Token response empty');
