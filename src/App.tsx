@@ -19,7 +19,14 @@ import {
   ArrowRight,
   Loader2,
   LogOut,
-  LogIn
+  LogIn,
+  Table,
+  Plus,
+  Trash2,
+  Maximize2,
+  Minimize2,
+  LayoutGrid,
+  List
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -82,6 +89,9 @@ export default function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
+  const [isBulkMode, setIsBulkMode] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [bulkRows, setBulkRows] = useState<FormData[]>([{ ...INITIAL_DATA }]);
 
   // Auto-calculated fields
   const [timestamp, setTimestamp] = useState('');
@@ -124,12 +134,15 @@ export default function App() {
   useEffect(() => {
     const updateDates = () => {
       const now = new Date();
-      const future = new Date(now);
-      future.setDate(now.getDate() + 4);
-
-      // If the 4th day is Sunday (0), move it to Monday (add 1 more day)
-      if (future.getDay() === 0) {
+      
+      // Calculate 4 working days from now (excluding Sundays)
+      let future = new Date(now);
+      let daysAdded = 0;
+      while (daysAdded < 4) {
         future.setDate(future.getDate() + 1);
+        if (future.getDay() !== 0) { // 0 is Sunday
+          daysAdded++;
+        }
       }
 
       setTimestamp(now.toLocaleString());
@@ -142,6 +155,7 @@ export default function App() {
       
       setMinDeliveryDate(minDateStr);
       setFormData(prev => ({ ...prev, deliveryDate: minDateStr }));
+      setBulkRows(prev => prev.map(row => ({ ...row, deliveryDate: minDateStr })));
     };
 
     updateDates();
@@ -167,13 +181,14 @@ export default function App() {
     setSubmitStatus('idle');
 
     try {
+      const dataToSubmit = isBulkMode 
+        ? bulkRows.map(row => ({ ...row, timestamp, email: user?.email || row.email }))
+        : { ...formData, timestamp };
+
       const response = await fetch('/api/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...formData,
-          timestamp,
-        }),
+        body: JSON.stringify(dataToSubmit),
       });
 
       let result;
@@ -188,16 +203,20 @@ export default function App() {
       if (result.success) {
         if (analytics) {
           logEvent(analytics, 'form_submission_success', {
-            brand: formData.brand,
-            department: formData.department
+            brand: isBulkMode ? 'bulk' : formData.brand,
+            department: isBulkMode ? 'bulk' : formData.department
           });
         }
         setSubmitStatus('success');
-        setFormData({
-          ...INITIAL_DATA,
-          email: user?.email || '',
-          deliveryDate: minDeliveryDate
-        });
+        if (isBulkMode) {
+          setBulkRows([{ ...INITIAL_DATA, email: user?.email || '', deliveryDate: minDeliveryDate }]);
+        } else {
+          setFormData({
+            ...INITIAL_DATA,
+            email: user?.email || '',
+            deliveryDate: minDeliveryDate
+          });
+        }
       } else {
         throw new Error(result.message || 'Submission failed');
       }
@@ -209,9 +228,38 @@ export default function App() {
     }
   };
 
+  const addBulkRow = () => {
+    setBulkRows(prev => {
+      const lastRow = prev[prev.length - 1];
+      return [...prev, { 
+        ...INITIAL_DATA, 
+        email: user?.email || '', 
+        deliveryDate: minDeliveryDate,
+        brand: lastRow?.brand || '',
+        department: lastRow?.department || '',
+        employeeName: lastRow?.employeeName || '',
+        storeName: lastRow?.storeName || '',
+      }];
+    });
+  };
+
+  const removeBulkRow = (index: number) => {
+    if (bulkRows.length > 1) {
+      setBulkRows(prev => prev.filter((_, i) => i !== index));
+    }
+  };
+
+  const handleBulkChange = (index: number, e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setBulkRows(prev => prev.map((row, i) => i === index ? { ...row, [name]: value } : row));
+  };
+
   return (
     <div className="min-h-screen bg-[#F0EBF8] py-8 px-4 sm:px-6 lg:px-8 font-sans">
-      <div className="max-w-3xl mx-auto space-y-6">
+      <div className={cn(
+        "mx-auto space-y-6 transition-all duration-300",
+        isBulkMode && isFullScreen ? "max-w-none px-4" : "max-w-3xl"
+      )}>
         
         {/* Header Image & Title Card */}
         <div className="bg-white rounded-xl shadow-sm overflow-hidden border-t-[10px] border-[#673AB7]">
@@ -233,32 +281,271 @@ export default function App() {
             <p className="text-gray-600 text-sm leading-relaxed">
               Please fill out this form for all creative requirements. Responses are automatically synced to the master spreadsheet.
             </p>
-            <div className="mt-4 flex flex-wrap gap-4 text-xs font-medium text-gray-400">
-              <div className="flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5" />
-                <span>{timestamp}</span>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex flex-wrap gap-4 text-xs font-medium text-gray-400">
+                <div className="flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>{timestamp}</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-purple-600">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Collecting email: {formData.email}</span>
+                </div>
               </div>
-              <div className="flex items-center gap-1.5 text-purple-600">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Collecting email: {formData.email}</span>
-              </div>
+              
+              {user && (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsBulkMode(!isBulkMode)}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 text-white text-xs font-bold rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
+                  >
+                    {isBulkMode ? <List className="w-3.5 h-3.5" /> : <LayoutGrid className="w-3.5 h-3.5" />}
+                    {isBulkMode ? 'SINGLE FORM' : 'BULK ENTRY'}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
         {/* Form Content */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          
-          {/* Basic Information Section */}
-          <Section title="Basic Information" icon={<User className="w-5 h-5 text-purple-500" />}>
+          {isBulkMode ? (
+            <Section 
+              title="Bulk Entry Mode" 
+              icon={<LayoutGrid className="w-5 h-5 text-purple-500" />}
+              extra={
+                <button
+                  type="button"
+                  onClick={() => setIsFullScreen(!isFullScreen)}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 text-gray-600 text-[10px] font-bold rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  {isFullScreen ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
+                  {isFullScreen ? 'EXIT FULL SCREEN' : 'FULL SCREEN'}
+                </button>
+              }
+            >
+              <div className="overflow-x-auto -mx-6 px-6">
+                <table className="w-full border-collapse min-w-[1200px]">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Brand</th>
+                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Dept</th>
+                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Name</th>
+                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Store</th>
+                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Description</th>
+                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Color</th>
+                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Image Ref</th>
+                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Date</th>
+                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Remarks</th>
+                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Type</th>
+                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Specs</th>
+                      <th className="p-2 text-center text-[10px] font-bold text-gray-500 uppercase">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bulkRows.map((row, idx) => (
+                      <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50/50 transition-colors">
+                        <td className="p-1">
+                          <select
+                            name="brand"
+                            value={row.brand}
+                            onChange={(e) => handleBulkChange(idx, e)}
+                            className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
+                          >
+                            <option value="">Brand</option>
+                            <option value="SOIE">SOIE</option>
+                            <option value="HEKTOR">HEKTOR</option>
+                          </select>
+                        </td>
+                        <td className="p-1">
+                          <input
+                            type="text"
+                            name="department"
+                            value={row.department}
+                            onChange={(e) => handleBulkChange(idx, e)}
+                            placeholder="Dept"
+                            className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
+                          />
+                        </td>
+                        <td className="p-1">
+                          <input
+                            type="text"
+                            name="employeeName"
+                            value={row.employeeName}
+                            onChange={(e) => handleBulkChange(idx, e)}
+                            placeholder="Name"
+                            className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
+                          />
+                        </td>
+                        <td className="p-1">
+                          <input
+                            type="text"
+                            name="storeName"
+                            value={row.storeName}
+                            onChange={(e) => handleBulkChange(idx, e)}
+                            placeholder="Store"
+                            className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
+                          />
+                        </td>
+                        <td className="p-1">
+                          <input
+                            type="text"
+                            name="description"
+                            value={row.description}
+                            onChange={(e) => handleBulkChange(idx, e)}
+                            placeholder="Desc"
+                            className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
+                          />
+                        </td>
+                        <td className="p-1">
+                          <input
+                            type="text"
+                            name="color"
+                            value={row.color}
+                            onChange={(e) => handleBulkChange(idx, e)}
+                            placeholder="Color"
+                            className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
+                          />
+                        </td>
+                        <td className="p-1">
+                          <input
+                            type="text"
+                            name="imageReference"
+                            value={row.imageReference}
+                            onChange={(e) => handleBulkChange(idx, e)}
+                            placeholder="Image URL"
+                            className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
+                          />
+                        </td>
+                        <td className="p-1">
+                          <input
+                            type="date"
+                            name="deliveryDate"
+                            min={minDeliveryDate}
+                            value={row.deliveryDate}
+                            onChange={(e) => handleBulkChange(idx, e)}
+                            className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
+                          />
+                        </td>
+                        <td className="p-1">
+                          <input
+                            type="text"
+                            name="remarks"
+                            value={row.remarks}
+                            onChange={(e) => handleBulkChange(idx, e)}
+                            placeholder="Remarks"
+                            className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
+                          />
+                        </td>
+                        <td className="p-1">
+                          <select
+                            name="artworkType"
+                            value={row.artworkType}
+                            onChange={(e) => handleBulkChange(idx, e)}
+                            className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
+                          >
+                            <option value="">Type</option>
+                            <option value="2D">2D</option>
+                            <option value="3D">3D</option>
+                          </select>
+                        </td>
+                        <td className="p-1">
+                          <div className="flex gap-1">
+                            {row.artworkType === '2D' ? (
+                              <>
+                                <input
+                                  type="text"
+                                  name="width2d"
+                                  value={row.width2d}
+                                  onChange={(e) => handleBulkChange(idx, e)}
+                                  placeholder="W"
+                                  className="w-12 p-1.5 text-[10px] border border-gray-200 rounded"
+                                />
+                                <input
+                                  type="text"
+                                  name="lengthHeight2d"
+                                  value={row.lengthHeight2d}
+                                  onChange={(e) => handleBulkChange(idx, e)}
+                                  placeholder="L/H"
+                                  className="w-12 p-1.5 text-[10px] border border-gray-200 rounded"
+                                />
+                                <input
+                                  type="text"
+                                  name="styleNoColor2d"
+                                  value={row.styleNoColor2d}
+                                  onChange={(e) => handleBulkChange(idx, e)}
+                                  placeholder="Style"
+                                  className="w-12 p-1.5 text-[10px] border border-gray-200 rounded"
+                                />
+                              </>
+                            ) : row.artworkType === '3D' ? (
+                              <>
+                                <input
+                                  type="text"
+                                  name="width3d"
+                                  value={row.width3d}
+                                  onChange={(e) => handleBulkChange(idx, e)}
+                                  placeholder="W"
+                                  className="w-10 p-1.5 text-[10px] border border-gray-200 rounded"
+                                />
+                                <input
+                                  type="text"
+                                  name="length3d"
+                                  value={row.length3d}
+                                  onChange={(e) => handleBulkChange(idx, e)}
+                                  placeholder="L"
+                                  className="w-10 p-1.5 text-[10px] border border-gray-200 rounded"
+                                />
+                                <input
+                                  type="text"
+                                  name="height3d"
+                                  value={row.height3d}
+                                  onChange={(e) => handleBulkChange(idx, e)}
+                                  placeholder="H"
+                                  className="w-10 p-1.5 text-[10px] border border-gray-200 rounded"
+                                />
+                              </>
+                            ) : (
+                              <span className="text-[10px] text-gray-300 italic">Select Type</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-1 text-center">
+                          <button
+                            type="button"
+                            onClick={() => removeBulkRow(idx)}
+                            className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <button
+                type="button"
+                onClick={addBulkRow}
+                className="mt-4 flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-600 text-xs font-bold rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                ADD NEW ROW
+              </button>
+            </Section>
+          ) : (
+            <>
+              {/* Basic Information Section */}
+              <Section title="Basic Information" icon={<User className="w-5 h-5 text-purple-500" />}>
             <div className="flex flex-col gap-6">
-              <InputGroup label="Email Address" required>
+              <InputGroup label="Email Address">
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <input
                     type="email"
                     name="email"
-                    required
                     readOnly={!!user}
                     value={formData.email}
                     onChange={handleChange}
@@ -296,10 +583,9 @@ export default function App() {
                 )}
               </InputGroup>
 
-              <InputGroup label="Brand" required>
+              <InputGroup label="Brand">
                 <select
                   name="brand"
-                  required
                   value={formData.brand}
                   onChange={handleChange}
                   className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all outline-none appearance-none text-base"
@@ -310,13 +596,12 @@ export default function App() {
                 </select>
               </InputGroup>
 
-              <InputGroup label="Department" required>
+              <InputGroup label="Department">
                 <div className="relative">
                   <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <input
                     type="text"
                     name="department"
-                    required
                     value={formData.department}
                     onChange={handleChange}
                     placeholder="e.g. Marketing"
@@ -325,11 +610,10 @@ export default function App() {
                 </div>
               </InputGroup>
 
-              <InputGroup label="Employee Name" required>
+              <InputGroup label="Employee Name">
                 <input
                   type="text"
                   name="employeeName"
-                  required
                   value={formData.employeeName}
                   onChange={handleChange}
                   placeholder="Full Name"
@@ -337,11 +621,10 @@ export default function App() {
                 />
               </InputGroup>
 
-              <InputGroup label="Store / Portal / Brand Name" required>
+              <InputGroup label="Store / Portal / Brand Name">
                 <input
                   type="text"
                   name="storeName"
-                  required
                   value={formData.storeName}
                   onChange={handleChange}
                   placeholder="Brand / Store / Portal Name"
@@ -354,10 +637,9 @@ export default function App() {
           {/* Creative Details Section */}
           <Section title="Creative Details" icon={<Palette className="w-5 h-5 text-purple-500" />}>
             <div className="space-y-6">
-              <InputGroup label="Description of Creative" required>
+              <InputGroup label="Description of Creative">
                 <textarea
                   name="description"
-                  required
                   rows={3}
                   value={formData.description}
                   onChange={handleChange}
@@ -367,11 +649,10 @@ export default function App() {
               </InputGroup>
 
               <div className="flex flex-col gap-6">
-                <InputGroup label="Color" required>
+                <InputGroup label="Color">
                   <input
                     type="text"
                     name="color"
-                    required
                     value={formData.color}
                     onChange={handleChange}
                     placeholder="e.g. #673AB7 or Royal Blue"
@@ -427,8 +708,8 @@ export default function App() {
           {/* Artwork Specifications Section */}
           <Section title="Artwork Specifications" icon={<Layers className="w-5 h-5 text-purple-500" />}>
             <div className="space-y-6">
-              <p className="text-xs text-red-500 -mt-2 mb-2 font-bold italic">
-                "Not Mandatory to fill, but selecting one option is required"
+              <p className="text-xs text-gray-400 -mt-2 mb-2 font-medium italic">
+                "Optional: Select a type if you have specific dimensions"
               </p>
               <div className="flex flex-wrap gap-3">
                 <button
@@ -551,12 +832,13 @@ export default function App() {
               </AnimatePresence>
             </div>
           </Section>
+          </>)}
 
           {/* Submit Button & Status */}
           <div className="pt-4">
             <button
               type="submit"
-              disabled={isSubmitting || !formData.artworkType}
+              disabled={isSubmitting}
               className={cn(
                 "w-full py-4 rounded-xl font-bold text-white shadow-lg transition-all flex items-center justify-center gap-2",
                 isSubmitting ? "bg-gray-400 cursor-not-allowed" : "bg-[#673AB7] hover:bg-[#5E35B1] active:scale-[0.98]"
@@ -614,7 +896,7 @@ export default function App() {
 
 // --- Helper Components ---
 
-function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+function Section({ title, icon, children, extra }: { title: string; icon: React.ReactNode; children: React.ReactNode; extra?: React.ReactNode }) {
   return (
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
@@ -622,9 +904,12 @@ function Section({ title, icon, children }: { title: string; icon: React.ReactNo
       viewport={{ once: true }}
       className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden"
     >
-      <div className="px-6 py-4 border-b border-gray-50 bg-gray-50/50 flex items-center gap-3">
-        {icon}
-        <h2 className="font-bold text-gray-800 tracking-tight">{title}</h2>
+      <div className="px-6 py-4 border-b border-gray-50 bg-gray-50/50 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          {icon}
+          <h2 className="font-bold text-gray-800 tracking-tight">{title}</h2>
+        </div>
+        {extra}
       </div>
       <div className="p-6">
         {children}
@@ -633,11 +918,11 @@ function Section({ title, icon, children }: { title: string; icon: React.ReactNo
   );
 }
 
-function InputGroup({ label, children, required }: { label: string; children: React.ReactNode; required?: boolean }) {
+function InputGroup({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
       <label className="block text-base font-bold text-gray-700 ml-1">
-        {label} {required && <span className="text-red-500">*</span>}
+        {label}
       </label>
       {children}
     </div>

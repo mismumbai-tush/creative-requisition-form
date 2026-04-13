@@ -20,9 +20,9 @@ app.use((req, res, next) => {
 });
 
 // Validate Environment Variables
-const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
+const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL || 'creative-requisition-form@carbon-theorem-472516-p3.iam.gserviceaccount.com';
 const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY;
-const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID || '1Ng_ItkiSLgfHOBTlX0CVN5l51eQM-55v_YYLw81XauM';
+const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID || '18viGPAOD1TUezHmKv4fsg_yV_5-nU_m6rtj2ph9ETVA';
 
 // Health Check Route
 app.get('/api/health', (req, res) => {
@@ -52,16 +52,61 @@ const submitToSheets = async (data: any) => {
   console.log('Cleaning private key...');
   let privateKey = GOOGLE_PRIVATE_KEY.trim();
   
-  // Remove surrounding quotes (single or double) and trailing commas/whitespace
-  // This handles cases where users copy from a JSON file like "key": "...",
-  privateKey = privateKey.replace(/^['"]/, '').replace(/['"]\s*,?\s*$/, '');
+  console.log('Raw key info:', {
+    length: privateKey.length,
+    startsWith: privateKey.substring(0, 20),
+    endsWith: privateKey.substring(privateKey.length - 20),
+    includesLiteralNewline: privateKey.includes('\n'),
+    includesEscapedNewline: privateKey.includes('\\n')
+  });
+
+  // 1. Check if the user pasted the entire JSON by mistake
+  if (privateKey.startsWith('{')) {
+    try {
+      const json = JSON.parse(privateKey);
+      if (json.private_key) {
+        privateKey = json.private_key;
+        console.log('Extracted key from JSON');
+      }
+    } catch (e) {
+      console.warn('Attempted to parse private key as JSON but failed');
+    }
+  }
+
+  // 2. Remove surrounding quotes (single or double) that might come from env var managers
+  privateKey = privateKey.replace(/^['"]/, '').replace(/['"]$/, '');
   
-  // Replace literal \n with actual newlines
+  // 3. Handle escaped newlines
   privateKey = privateKey.replace(/\\n/g, '\n');
   
-  if (!privateKey.includes('-----BEGIN PRIVATE KEY-----')) {
-    console.warn('Warning: GOOGLE_PRIVATE_KEY is missing PEM headers.');
+  // 4. Remove any carriage returns
+  privateKey = privateKey.replace(/\r/g, '');
+
+  // 5. Ensure the key has proper PEM headers and footers and correct line wrapping
+  // We look for the base64 content between headers, or just the base64 content itself
+  const header = '-----BEGIN PRIVATE KEY-----';
+  const footer = '-----END PRIVATE KEY-----';
+  
+  let base64 = privateKey;
+  if (base64.includes(header)) {
+    base64 = base64.split(header)[1];
   }
+  if (base64.includes(footer)) {
+    base64 = base64.split(footer)[0];
+  }
+  
+  // Remove all whitespace, including newlines, from the base64 part
+  base64 = base64.replace(/\s/g, '');
+  
+  // Re-wrap to 64 characters per line (standard PEM format)
+  const wrapped = base64.match(/.{1,64}/g)?.join('\n');
+  privateKey = `${header}\n${wrapped}\n${footer}`;
+
+  console.log('Final cleaned key info:', {
+    length: privateKey.length,
+    startsWith: privateKey.substring(0, 30),
+    endsWith: privateKey.substring(privateKey.length - 30)
+  });
 
   console.log('Private key cleaned. Length:', privateKey.length);
   console.log('Private key starts with:', privateKey.substring(0, 30));
@@ -161,15 +206,16 @@ const submitToSheets = async (data: any) => {
   }
 
   console.log('Appending row data...');
-  const row = [
-    data.timestamp, data.email, data.brand, data.department, data.employeeName,
-    data.storeName, data.description, data.color, data.imageReference,
-    data.deliveryDate, data.remarks,
+  const dataArray = Array.isArray(data) ? data : [data];
+  const rows = dataArray.map(item => [
+    item.timestamp, item.email, item.brand, item.department, item.employeeName,
+    item.storeName, item.description, item.color, item.imageReference,
+    item.deliveryDate, item.remarks,
     // 2D Data (L, M, N)
-    data.width2d || '', data.lengthHeight2d || '', data.styleNoColor2d || '',
+    item.width2d || '', item.lengthHeight2d || '', item.styleNoColor2d || '',
     // 3D Data (O, P, Q)
-    data.width3d || '', data.length3d || '', data.height3d || ''
-  ];
+    item.width3d || '', item.length3d || '', item.height3d || ''
+  ]);
 
   // Use A:F range to find the last row based on mandatory columns
   const appendResponse = await fetch(`${baseUrl}/values/${monthYear}!A:F:append?valueInputOption=RAW`, {
@@ -178,7 +224,7 @@ const submitToSheets = async (data: any) => {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ values: [row] })
+    body: JSON.stringify({ values: rows })
   });
 
   if (!appendResponse.ok) {
