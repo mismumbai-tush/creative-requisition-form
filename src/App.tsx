@@ -31,14 +31,25 @@ import {
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
+import Papa from 'papaparse';
+
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+// --- Constants ---
+const LALANA_EMAIL = 'lalana.shirsat@ginzalimited.com';
+const LALANA_DEFAULTS = {
+  brand: 'SOIE',
+  department: 'SOIE Sales',
+  employeeName: 'Lalana'
+};
 
 // --- Types ---
 type ArtworkType = '3D' | '2D';
 
 interface FormData {
+  id?: string;
   email: string;
   brand: string;
   department: string;
@@ -49,6 +60,10 @@ interface FormData {
   imageReference: string;
   remarks: string;
   artworkType: ArtworkType | '';
+  // New columns for requested mapping
+  material: string;
+  qty: string;
+  styleNo: string;
   // 2D Fields
   width2d: string;
   lengthHeight2d: string;
@@ -58,6 +73,9 @@ interface FormData {
   length3d: string;
   height3d: string;
   deliveryDate: string;
+  // Unified fields for bulk/csv
+  width: string;
+  height: string;
 }
 
 const INITIAL_DATA: FormData = {
@@ -71,6 +89,9 @@ const INITIAL_DATA: FormData = {
   imageReference: '',
   remarks: '',
   artworkType: '',
+  material: '',
+  qty: '',
+  styleNo: '',
   width2d: '',
   lengthHeight2d: '',
   styleNoColor2d: '',
@@ -78,6 +99,8 @@ const INITIAL_DATA: FormData = {
   length3d: '',
   height3d: '',
   deliveryDate: '',
+  width: '',
+  height: '',
 };
 
 export default function App() {
@@ -101,7 +124,14 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       if (currentUser?.email) {
-        setFormData(prev => ({ ...prev, email: currentUser.email || '' }));
+        const isLalana = currentUser.email.toLowerCase() === LALANA_EMAIL.toLowerCase();
+        setFormData(prev => ({ 
+          ...prev, 
+          email: currentUser.email || '',
+          brand: isLalana ? LALANA_DEFAULTS.brand : prev.brand,
+          department: isLalana ? LALANA_DEFAULTS.department : prev.department,
+          employeeName: isLalana ? LALANA_DEFAULTS.employeeName : prev.employeeName
+        }));
       }
     });
     return () => unsubscribe();
@@ -129,6 +159,62 @@ export default function App() {
   const handleSignOut = async () => {
     await signOut(auth);
     setFormData(prev => ({ ...prev, email: '' }));
+  };
+
+  const handleDownloadTemplate = () => {
+    const headers = ['sr no', 'Customer Name', 'Material', 'Qty', 'Width', 'Height', 'Style No', 'colour', 'Remark', 'Req Date'];
+    const csvContent = Papa.unparse([headers, ['1', '', '', '', '', '', '', '', '', '']]);
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.href = url;
+    link.setAttribute('download', 'Artwork_Requisition_Template.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => {
+        const rows = results.data as any[];
+        const isLalana = formData.email?.toLowerCase() === LALANA_EMAIL.toLowerCase();
+
+        const mappedRows: FormData[] = rows.map((row, index) => ({
+          ...INITIAL_DATA,
+          id: row['sr no'] || String(index + 1),
+          email: formData.email,
+          brand: isLalana ? LALANA_DEFAULTS.brand : formData.brand,
+          department: isLalana ? LALANA_DEFAULTS.department : formData.department,
+          employeeName: isLalana ? LALANA_DEFAULTS.employeeName : formData.employeeName,
+          storeName: row['Customer Name'] || '',
+          material: row['Material'] || '',
+          qty: row['Qty'] || '',
+          width: row['Width'] || '',
+          height: row['Height'] || '',
+          styleNo: row['Style No'] || '',
+          color: row['colour'] || '',
+          remarks: row['Remark'] || '',
+          deliveryDate: row['Req Date'] || minDeliveryDate,
+          description: `Bulk CSV Import Row ${index + 1}`
+        }));
+
+        if (mappedRows.length > 0) {
+          setIsBulkMode(true);
+          setBulkRows(mappedRows);
+        }
+      },
+      error: (error) => {
+        alert("Error parsing CSV: " + error.message);
+      }
+    });
+    // Reset file input
+    event.target.value = '';
   };
 
   useEffect(() => {
@@ -229,16 +315,24 @@ export default function App() {
   };
 
   const addBulkRow = () => {
+    const isLalana = user?.email?.toLowerCase() === LALANA_EMAIL.toLowerCase();
     setBulkRows(prev => {
       const lastRow = prev[prev.length - 1];
       return [...prev, { 
         ...INITIAL_DATA, 
         email: user?.email || '', 
         deliveryDate: minDeliveryDate,
-        brand: lastRow?.brand || '',
-        department: lastRow?.department || '',
-        employeeName: lastRow?.employeeName || '',
-        storeName: lastRow?.storeName || '',
+        brand: lastRow?.brand || (isLalana ? LALANA_DEFAULTS.brand : ''),
+        department: lastRow?.department || (isLalana ? LALANA_DEFAULTS.department : ''),
+        employeeName: lastRow?.employeeName || (isLalana ? LALANA_DEFAULTS.employeeName : ''),
+        storeName: '',
+        material: '',
+        qty: '',
+        width: '',
+        height: '',
+        styleNo: '',
+        color: '',
+        remarks: '',
       }];
     });
   };
@@ -294,11 +388,25 @@ export default function App() {
               </div>
               
               {user && (
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDownloadTemplate}
+                    className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-[10px] font-bold rounded-lg transition-colors flex items-center gap-1.5"
+                  >
+                    <Table className="w-3.5 h-3.5" />
+                    DOWNLOAD TEMPLATE
+                  </button>
+                  <label className="cursor-pointer px-3 py-1.5 bg-purple-100 hover:bg-purple-200 text-purple-700 text-[10px] font-bold rounded-lg transition-colors flex items-center gap-1.5">
+                    <Plus className="w-3.5 h-3.5" />
+                    UPLOAD CSV
+                    <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
+                  </label>
+                  <div className="w-[1px] h-6 bg-gray-200 mx-1"></div>
                   <button
                     type="button"
                     onClick={() => setIsBulkMode(!isBulkMode)}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 text-white text-xs font-bold rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
+                    className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 text-white text-[10px] font-bold rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
                   >
                     {isBulkMode ? <List className="w-3.5 h-3.5" /> : <LayoutGrid className="w-3.5 h-3.5" />}
                     {isBulkMode ? 'SINGLE FORM' : 'BULK ENTRY'}
@@ -333,14 +441,14 @@ export default function App() {
                       <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Brand</th>
                       <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Dept</th>
                       <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Name</th>
-                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Store</th>
-                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Description</th>
+                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Customer</th>
+                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Material</th>
+                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Qty</th>
+                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Width</th>
+                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Height</th>
+                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Style No</th>
                       <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Color</th>
-                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Image Ref</th>
-                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Date</th>
-                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Remarks</th>
-                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Type</th>
-                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Specs</th>
+                      <th className="p-2 text-left text-[10px] font-bold text-gray-500 uppercase">Remark</th>
                       <th className="p-2 text-center text-[10px] font-bold text-gray-500 uppercase">Action</th>
                     </tr>
                   </thead>
@@ -385,17 +493,57 @@ export default function App() {
                             name="storeName"
                             value={row.storeName}
                             onChange={(e) => handleBulkChange(idx, e)}
-                            placeholder="Store"
+                            placeholder="Customer"
                             className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
                           />
                         </td>
                         <td className="p-1">
                           <input
                             type="text"
-                            name="description"
-                            value={row.description}
+                            name="material"
+                            value={row.material}
                             onChange={(e) => handleBulkChange(idx, e)}
-                            placeholder="Desc"
+                            placeholder="Material"
+                            className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
+                          />
+                        </td>
+                        <td className="p-1">
+                          <input
+                            type="text"
+                            name="qty"
+                            value={row.qty}
+                            onChange={(e) => handleBulkChange(idx, e)}
+                            placeholder="Qty"
+                            className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
+                          />
+                        </td>
+                        <td className="p-1">
+                          <input
+                            type="text"
+                            name="width"
+                            value={row.width}
+                            onChange={(e) => handleBulkChange(idx, e)}
+                            placeholder="W"
+                            className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
+                          />
+                        </td>
+                        <td className="p-1">
+                          <input
+                            type="text"
+                            name="height"
+                            value={row.height}
+                            onChange={(e) => handleBulkChange(idx, e)}
+                            placeholder="H"
+                            className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
+                          />
+                        </td>
+                        <td className="p-1">
+                          <input
+                            type="text"
+                            name="styleNo"
+                            value={row.styleNo}
+                            onChange={(e) => handleBulkChange(idx, e)}
+                            placeholder="Style"
                             className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
                           />
                         </td>
@@ -412,105 +560,12 @@ export default function App() {
                         <td className="p-1">
                           <input
                             type="text"
-                            name="imageReference"
-                            value={row.imageReference}
-                            onChange={(e) => handleBulkChange(idx, e)}
-                            placeholder="Image URL"
-                            className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
-                          />
-                        </td>
-                        <td className="p-1">
-                          <input
-                            type="date"
-                            name="deliveryDate"
-                            min={minDeliveryDate}
-                            value={row.deliveryDate}
-                            onChange={(e) => handleBulkChange(idx, e)}
-                            className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
-                          />
-                        </td>
-                        <td className="p-1">
-                          <input
-                            type="text"
                             name="remarks"
                             value={row.remarks}
                             onChange={(e) => handleBulkChange(idx, e)}
-                            placeholder="Remarks"
+                            placeholder="Remark"
                             className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
                           />
-                        </td>
-                        <td className="p-1">
-                          <select
-                            name="artworkType"
-                            value={row.artworkType}
-                            onChange={(e) => handleBulkChange(idx, e)}
-                            className="w-full p-1.5 text-xs border border-gray-200 rounded outline-none focus:ring-1 focus:ring-purple-500"
-                          >
-                            <option value="">Type</option>
-                            <option value="2D">2D</option>
-                            <option value="3D">3D</option>
-                          </select>
-                        </td>
-                        <td className="p-1">
-                          <div className="flex gap-1">
-                            {row.artworkType === '2D' ? (
-                              <>
-                                <input
-                                  type="text"
-                                  name="width2d"
-                                  value={row.width2d}
-                                  onChange={(e) => handleBulkChange(idx, e)}
-                                  placeholder="W"
-                                  className="w-12 p-1.5 text-[10px] border border-gray-200 rounded"
-                                />
-                                <input
-                                  type="text"
-                                  name="lengthHeight2d"
-                                  value={row.lengthHeight2d}
-                                  onChange={(e) => handleBulkChange(idx, e)}
-                                  placeholder="L/H"
-                                  className="w-12 p-1.5 text-[10px] border border-gray-200 rounded"
-                                />
-                                <input
-                                  type="text"
-                                  name="styleNoColor2d"
-                                  value={row.styleNoColor2d}
-                                  onChange={(e) => handleBulkChange(idx, e)}
-                                  placeholder="Style"
-                                  className="w-12 p-1.5 text-[10px] border border-gray-200 rounded"
-                                />
-                              </>
-                            ) : row.artworkType === '3D' ? (
-                              <>
-                                <input
-                                  type="text"
-                                  name="width3d"
-                                  value={row.width3d}
-                                  onChange={(e) => handleBulkChange(idx, e)}
-                                  placeholder="W"
-                                  className="w-10 p-1.5 text-[10px] border border-gray-200 rounded"
-                                />
-                                <input
-                                  type="text"
-                                  name="length3d"
-                                  value={row.length3d}
-                                  onChange={(e) => handleBulkChange(idx, e)}
-                                  placeholder="L"
-                                  className="w-10 p-1.5 text-[10px] border border-gray-200 rounded"
-                                />
-                                <input
-                                  type="text"
-                                  name="height3d"
-                                  value={row.height3d}
-                                  onChange={(e) => handleBulkChange(idx, e)}
-                                  placeholder="H"
-                                  className="w-10 p-1.5 text-[10px] border border-gray-200 rounded"
-                                />
-                              </>
-                            ) : (
-                              <span className="text-[10px] text-gray-300 italic">Select Type</span>
-                            )}
-                          </div>
                         </td>
                         <td className="p-1 text-center">
                           <button
@@ -672,6 +727,39 @@ export default function App() {
                       className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all outline-none"
                     />
                   </div>
+                </InputGroup>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                <InputGroup label="Material">
+                  <input
+                    type="text"
+                    name="material"
+                    value={formData.material}
+                    onChange={handleChange}
+                    placeholder="e.g. Paper"
+                    className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none"
+                  />
+                </InputGroup>
+                <InputGroup label="Qty">
+                  <input
+                    type="text"
+                    name="qty"
+                    value={formData.qty}
+                    onChange={handleChange}
+                    placeholder="Quantity"
+                    className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none"
+                  />
+                </InputGroup>
+                <InputGroup label="Style No">
+                  <input
+                    type="text"
+                    name="styleNo"
+                    value={formData.styleNo}
+                    onChange={handleChange}
+                    placeholder="Style #"
+                    className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none"
+                  />
                 </InputGroup>
               </div>
 

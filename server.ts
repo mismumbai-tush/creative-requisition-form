@@ -177,17 +177,8 @@ const submitToSheets = async (data: any) => {
     console.log('Adding headers to new sheet...');
     const headers = [
       'Timestamp', 'Email', 'Brand', 'Department', 'Employee Name', 
-      'Store/Portal/Brand Name', 'Description of Creative', 'Color', 
-      'Image Reference', 'Required Delivery Date', 'Extra Remarks', 
-      'Width', 'Length/Height', 'Style no with colour', 
-      'Width', 'Length', 'Height'
-    ];
-
-    // Top-level category headers
-    const topHeaders = [
-      '', '', '', '', '', '', '', '', '', '', '', 
-      '2D / FLAT ARTWORKS', '', '', 
-      '3D ARTWORKS', '', ''
+      'Customer Name', 'Material', 'Color', 'Qty', 'Description', 
+      'Remark', 'Width', 'Height', 'Style No', 'Req Date'
     ];
 
     const headerResponse = await fetch(`${baseUrl}/values/${monthYear}!A1?valueInputOption=RAW`, {
@@ -196,7 +187,7 @@ const submitToSheets = async (data: any) => {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ values: [topHeaders, headers] })
+      body: JSON.stringify({ values: [headers] })
     });
 
     if (!headerResponse.ok) {
@@ -208,17 +199,25 @@ const submitToSheets = async (data: any) => {
   console.log('Appending row data...');
   const dataArray = Array.isArray(data) ? data : [data];
   const rows = dataArray.map(item => [
-    item.timestamp, item.email, item.brand, item.department, item.employeeName,
-    item.storeName, item.description, item.color, item.imageReference,
-    item.deliveryDate, item.remarks,
-    // 2D Data (L, M, N)
-    item.width2d || '', item.lengthHeight2d || '', item.styleNoColor2d || '',
-    // 3D Data (O, P, Q)
-    item.width3d || '', item.length3d || '', item.height3d || ''
+    item.timestamp,             // A
+    item.email,                 // B
+    item.brand,                 // C
+    item.department,            // D
+    item.employeeName,          // E
+    item.storeName,             // F
+    item.material,              // G
+    item.color,                 // H
+    item.qty,                   // I
+    item.description,           // J
+    item.remarks,               // K
+    item.width || item.width2d || item.width3d || '',           // L
+    item.height || item.lengthHeight2d || item.height3d || '',   // M
+    item.styleNo || item.styleNoColor2d || '',                    // N
+    item.deliveryDate || ''                                      // O
   ]);
 
   // Use A:F range to find the last row based on mandatory columns
-  const appendResponse = await fetch(`${baseUrl}/values/${monthYear}!A:F:append?valueInputOption=RAW`, {
+  const appendResponse = await fetch(`${baseUrl}/values/${monthYear}!A:O:append?valueInputOption=RAW`, {
     method: 'POST',
     headers: { 
       Authorization: `Bearer ${token}`,
