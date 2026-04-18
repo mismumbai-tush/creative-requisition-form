@@ -38,7 +38,7 @@ function cn(...inputs: ClassValue[]) {
 }
 
 // --- Constants ---
-const LALANA_EMAIL = 'lalana.shirsat@ginzalimited.com';
+const LALANA_EMAIL = 'priyashirsat.ginzalimited@gmail.com';
 const LALANA_DEFAULTS = {
   brand: 'SOIE',
   department: 'SOIE Sales',
