@@ -147,8 +147,8 @@ export default function App() {
       console.error("Sign in error:", error);
       if (error.code === 'auth/operation-not-allowed') {
         setErrorMessage("Google Sign-In is not enabled in Firebase Console. Please enable it in Authentication > Sign-in method.");
-      } else if (error.code === 'auth/cancelled-popup-request') {
-        setErrorMessage("Sign-in popup was closed before finishing.");
+      } else if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-closed-by-user') {
+        setErrorMessage("Sign-in popup was closed before finishing. Please try again.");
       } else {
         setErrorMessage("Failed to sign in: " + error.message);
       }
@@ -162,7 +162,7 @@ export default function App() {
   };
 
   const handleDownloadTemplate = () => {
-    const headers = ['sr no', 'Customer Name', 'Material', 'Qty', 'Width', 'Height', 'Style No', 'colour', 'Remark', 'Req Date'];
+    const headers = ['sr no', 'Customer Name', 'Material', 'Qty', 'Description', 'Width', 'Height', 'Style No', 'colour', 'Remark'];
     const csvContent = Papa.unparse([headers, ['1', '', '', '', '', '', '', '', '', '']]);
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
@@ -182,26 +182,29 @@ export default function App() {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
-        const rows = results.data as any[];
+        const rows = (results.data as any[]).filter(row => {
+          const name = row['Customer Name'] || row['customer name'] || row['CustomerName'];
+          return name && name.trim() !== '';
+        });
         const isLalana = formData.email?.toLowerCase() === LALANA_EMAIL.toLowerCase();
 
         const mappedRows: FormData[] = rows.map((row, index) => ({
           ...INITIAL_DATA,
-          id: row['sr no'] || String(index + 1),
+          id: row['sr no'] || row['Sr No'] || String(index + 1),
           email: formData.email,
           brand: isLalana ? LALANA_DEFAULTS.brand : formData.brand,
           department: isLalana ? LALANA_DEFAULTS.department : formData.department,
           employeeName: isLalana ? LALANA_DEFAULTS.employeeName : formData.employeeName,
-          storeName: row['Customer Name'] || '',
-          material: row['Material'] || '',
-          qty: row['Qty'] || '',
-          width: row['Width'] || '',
-          height: row['Height'] || '',
-          styleNo: row['Style No'] || '',
-          color: row['colour'] || '',
-          remarks: row['Remark'] || '',
-          deliveryDate: row['Req Date'] || minDeliveryDate,
-          description: `Bulk CSV Import Row ${index + 1}`
+          storeName: row['Customer Name'] || row['customer name'] || row['CustomerName'] || '',
+          material: row['Material'] || row['material'] || '',
+          qty: row['Qty'] || row['qty'] || '',
+          width: row['Width'] || row['width'] || '',
+          height: row['Height'] || row['height'] || '',
+          styleNo: row['Style No'] || row['style no'] || row['StyleNo'] || '',
+          color: row['colour'] || row['Color'] || row['color'] || '',
+          remarks: row['Remark'] || row['remark'] || '',
+          deliveryDate: minDeliveryDate, // Force min delivery date always
+          description: row['Description'] || row['description'] || ''
         }));
 
         if (mappedRows.length > 0) {
@@ -268,8 +271,21 @@ export default function App() {
 
     try {
       const dataToSubmit = isBulkMode 
-        ? bulkRows.map(row => ({ ...row, timestamp, email: user?.email || row.email }))
-        : { ...formData, timestamp };
+        ? bulkRows
+            .filter(row => row.storeName && row.storeName.trim() !== '') // Filter empty rows (Customer Name is mandatory)
+            .map(row => ({ 
+              ...row, 
+              timestamp, 
+              deliveryDate: minDeliveryDate, // Force 4 working days date
+              email: user?.email || row.email 
+            }))
+        : { ...formData, timestamp, deliveryDate: minDeliveryDate }; // Force 4 working days date
+
+      if (isBulkMode && (dataToSubmit as any[]).length === 0) {
+        setErrorMessage("Please enter at least one valid row.");
+        setIsSubmitting(false);
+        return;
+      }
 
       const response = await fetch('/api/submit', {
         method: 'POST',
