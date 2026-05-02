@@ -481,6 +481,7 @@ export default function App() {
                             <option value="">Brand</option>
                             <option value="SOIE">SOIE</option>
                             <option value="HEKTOR">HEKTOR</option>
+                            <option value="GINZA">GINZA</option>
                           </select>
                         </td>
                         <td className="p-1">
@@ -664,6 +665,7 @@ export default function App() {
                   <option value="">Select Brand</option>
                   <option value="SOIE">SOIE</option>
                   <option value="HEKTOR">HEKTOR</option>
+                  <option value="GINZA">GINZA</option>
                 </select>
               </InputGroup>
 
